@@ -2,6 +2,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Sequence
+import random
+
+import numpy as np
 
 import torch
 from torch import nn
@@ -11,7 +15,7 @@ from torch.optim.lr_scheduler import StepLR
 from .config import apply_overrides, load_config
 from .data import DatasetConfig, H5SequenceDataset
 from .logging import MetricsLogger, setup_logging
-from .metrics import rmse, vrmse
+from .metrics import rmse, vrmse, windowed_vrmse
 from .models import FNOS, LiteFNO
 
 
@@ -23,6 +27,17 @@ class TrainingConfig:
     lr_step: int = 100
     lr_gamma: float = 0.5
     device: str = "cpu"
+    seed: int | None = 1337
+    deterministic: bool = False
+    eval_every: int = 1
+    eval_splits: Sequence[str] = ("train", "valid")
+    eval_windows: Sequence[Sequence[int]] = ((6, 12), (13, 30))
+    test_at_end: bool = True
+    checkpoint_dir: str | None = None
+    checkpoint_every: int = 0
+    resume_from: str | None = None
+    num_workers: int = 0
+    pin_memory: bool = False
 
 
 def infer_fields(path: Path, dataset_key: str) -> int:
@@ -58,6 +73,108 @@ def build_model(model_cfg: dict, in_channels: int, out_channels: int) -> nn.Modu
     return LiteFNO(in_channels, out_channels, width=width, rank=rank, layers=layers)
 
 
+def count_parameters(model: nn.Module) -> int:
+    return sum(param.numel() for param in model.parameters())
+
+
+def set_seed(seed: int, deterministic: bool = False) -> None:
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+    if deterministic:
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
+
+
+def normalize_windows(windows: Sequence[Sequence[int]], output_steps: int) -> list[tuple[int, int]]:
+    valid = []
+    for window in windows:
+        if len(window) != 2:
+            raise ValueError(f"Window should be (start, end): {window}")
+        start, end = int(window[0]), int(window[1])
+        if end <= start:
+            raise ValueError(f"Window end must be greater than start: {window}")
+        if output_steps >= end:
+            valid.append((start, end))
+    return valid
+
+
+def build_dataloaders(
+    dataset_cfg: dict,
+    batch_size: int,
+    dataset_key: str,
+    input_steps: int,
+    output_steps: int,
+    stride: int,
+    cache: str,
+    num_workers: int,
+    pin_memory: bool,
+) -> dict[str, torch.utils.data.DataLoader]:
+    processed_dir = Path(dataset_cfg.get("processed_dir", dataset_cfg.get("output_dir", "")))
+    splits = dataset_cfg.get("splits", ["train", "valid", "test"])
+    loaders: dict[str, torch.utils.data.DataLoader] = {}
+    for split in splits:
+        path = processed_dir / f"{split}.h5"
+        if not path.exists():
+            continue
+        ds_config = DatasetConfig(
+            path=path,
+            dataset_key=dataset_key,
+            input_steps=input_steps,
+            output_steps=output_steps,
+            stride=stride,
+            cache=cache,
+        )
+        dataset = H5SequenceDataset(ds_config)
+        loader = torch.utils.data.DataLoader(
+            dataset,
+            batch_size=batch_size,
+            shuffle=split == "train",
+            num_workers=num_workers,
+            pin_memory=pin_memory,
+        )
+        loaders[split] = loader
+    if "train" not in loaders:
+        raise FileNotFoundError(f"Training split not found under {processed_dir}")
+    return loaders
+
+
+def save_checkpoint(
+    model: nn.Module,
+    optimizer: torch.optim.Optimizer,
+    epoch: int,
+    path: Path,
+    scheduler: torch.optim.lr_scheduler._LRScheduler | None = None,
+) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "epoch": epoch,
+        "model_state": model.state_dict(),
+        "optimizer_state": optimizer.state_dict(),
+    }
+    if scheduler is not None:
+        payload["scheduler_state"] = scheduler.state_dict()
+    torch.save(payload, path)
+
+
+def load_checkpoint(
+    path: Path,
+    model: nn.Module,
+    optimizer: torch.optim.Optimizer | None = None,
+    scheduler: torch.optim.lr_scheduler._LRScheduler | None = None,
+    device: torch.device | None = None,
+) -> int:
+    state = torch.load(path, map_location=device or "cpu")
+    model.load_state_dict(state["model_state"])
+    if optimizer is not None and "optimizer_state" in state:
+        optimizer.load_state_dict(state["optimizer_state"])
+    if scheduler is not None and "scheduler_state" in state:
+        scheduler.load_state_dict(state["scheduler_state"])
+    return int(state.get("epoch", 0))
+
+
 def train_epoch(model: nn.Module, loader, optimizer, device: torch.device, output_steps: int, fields: int):
     model.train()
     total_loss = 0.0
@@ -75,10 +192,18 @@ def train_epoch(model: nn.Module, loader, optimizer, device: torch.device, outpu
     return total_loss / max(1, len(loader))
 
 
-def evaluate(model: nn.Module, loader, device: torch.device, output_steps: int, fields: int):
+def evaluate(
+    model: nn.Module,
+    loader,
+    device: torch.device,
+    output_steps: int,
+    fields: int,
+    windows: Sequence[tuple[int, int]] | None = None,
+):
     model.eval()
     total_rmse = 0.0
     total_vrmse = 0.0
+    window_sums = {}
     with torch.no_grad():
         for inputs, targets in loader:
             inputs = inputs.to(device)
@@ -88,8 +213,15 @@ def evaluate(model: nn.Module, loader, device: torch.device, output_steps: int, 
             preds = unflatten_time(preds, output_steps, fields)
             total_rmse += rmse(preds, targets).mean().item()
             total_vrmse += vrmse(preds, targets).mean().item()
+            if windows:
+                window_metrics = windowed_vrmse(preds, targets, windows=windows)
+                for key, value in window_metrics.items():
+                    window_sums[key] = window_sums.get(key, 0.0) + value.mean().item()
     count = max(1, len(loader))
-    return {"rmse": total_rmse / count, "vrmse": total_vrmse / count}
+    metrics = {"rmse": total_rmse / count, "vrmse": total_vrmse / count}
+    for key, value in window_sums.items():
+        metrics[key] = value / count
+    return metrics
 
 
 def run_training(config_path: Path, overrides=None) -> None:
@@ -101,35 +233,66 @@ def run_training(config_path: Path, overrides=None) -> None:
     dataset_cfg = config["dataset"]
     dataset_key = dataset_cfg.get("dataset_key", "data")
     processed_dir = Path(dataset_cfg.get("processed_dir", dataset_cfg.get("output_dir", "")))
-    data_dir = processed_dir / "train.h5"
-    fields = dataset_cfg.get("fields") or infer_fields(data_dir, dataset_key)
+    train_path = processed_dir / "train.h5"
+    fields = dataset_cfg.get("fields") or infer_fields(train_path, dataset_key)
     input_steps = dataset_cfg.get("input_steps", 1)
     output_steps = dataset_cfg.get("output_steps", 1)
 
     train_cfg = TrainingConfig(**config.get("training", {}))
     device = torch.device(train_cfg.device)
+    eval_windows = normalize_windows(train_cfg.eval_windows, output_steps) if train_cfg.eval_windows else []
+    if isinstance(train_cfg.eval_splits, str):
+        eval_splits = [train_cfg.eval_splits]
+    else:
+        eval_splits = list(train_cfg.eval_splits)
+    if train_cfg.seed is not None:
+        set_seed(train_cfg.seed, train_cfg.deterministic)
 
-    ds_config = DatasetConfig(
-        path=data_dir,
+    loaders = build_dataloaders(
+        dataset_cfg=dataset_cfg,
+        batch_size=train_cfg.batch_size,
         dataset_key=dataset_key,
         input_steps=input_steps,
         output_steps=output_steps,
         stride=dataset_cfg.get("stride", 1),
         cache=dataset_cfg.get("cache", "none"),
+        num_workers=train_cfg.num_workers,
+        pin_memory=train_cfg.pin_memory,
     )
-    dataset = H5SequenceDataset(ds_config)
-    loader = torch.utils.data.DataLoader(dataset, batch_size=train_cfg.batch_size, shuffle=True)
+    train_loader = loaders["train"]
 
     in_channels = input_steps * fields
     out_channels = output_steps * fields
     model = build_model(config.get("model", {}), in_channels, out_channels).to(device)
+    param_count = count_parameters(model)
     optimizer = AdamW(model.parameters(), lr=train_cfg.lr)
     scheduler = StepLR(optimizer, step_size=train_cfg.lr_step, gamma=train_cfg.lr_gamma)
+    start_epoch = 0
+    if train_cfg.resume_from:
+        resume_path = Path(train_cfg.resume_from)
+        start_epoch = load_checkpoint(resume_path, model, optimizer, scheduler, device)
+        if start_epoch < 0:
+            start_epoch = 0
 
     logger = MetricsLogger(Path(config.get("logging", {}).get("metrics_path", "outputs/logs/metrics.jsonl")))
 
-    for epoch in range(train_cfg.epochs):
-        loss = train_epoch(model, loader, optimizer, device, output_steps, fields)
-        metrics = evaluate(model, loader, device, output_steps, fields)
-        logger.log(epoch, {"loss": loss, **metrics})
+    for epoch in range(start_epoch, train_cfg.epochs):
+        loss = train_epoch(model, train_loader, optimizer, device, output_steps, fields)
+        log_payload = {"loss": loss, "params": param_count}
+        if train_cfg.eval_every > 0 and (epoch + 1) % train_cfg.eval_every == 0:
+            for split in eval_splits:
+                loader = loaders.get(split)
+                if loader is None:
+                    continue
+                metrics = evaluate(model, loader, device, output_steps, fields, windows=eval_windows)
+                for key, value in metrics.items():
+                    log_payload[f"{split}_{key}"] = value
+        logger.log(epoch, log_payload)
+        if train_cfg.checkpoint_dir and train_cfg.checkpoint_every > 0:
+            if (epoch + 1) % train_cfg.checkpoint_every == 0:
+                ckpt_path = Path(train_cfg.checkpoint_dir) / f"epoch_{epoch + 1:04d}.pt"
+                save_checkpoint(model, optimizer, epoch + 1, ckpt_path, scheduler=scheduler)
         scheduler.step()
+    if train_cfg.test_at_end and "test" in loaders:
+        test_metrics = evaluate(model, loaders["test"], device, output_steps, fields, windows=eval_windows)
+        logger.log(train_cfg.epochs, {f"test_{key}": value for key, value in test_metrics.items()})
