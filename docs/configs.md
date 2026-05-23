@@ -48,11 +48,13 @@ Used by `litefno download` and `litefno preprocess`:
 ## Training config
 
 - `epochs`, `batch_size`, `lr`, `lr_step`, `lr_gamma`, `device`
+- `seed`, `deterministic`: reproducibility controls.
 - `eval_every`: evaluate every N epochs (0 disables).
 - `eval_splits`: list of splits to evaluate (e.g., `["train", "valid"]`).
 - `eval_windows`: list of `[start, end]` time windows for VRMSE.
 - `test_at_end`: run test metrics after training.
 - `checkpoint_dir`, `checkpoint_every`: checkpoint output configuration.
+- `resume_from`: path to a checkpoint to resume training.
 - `num_workers`, `pin_memory`: DataLoader settings.
 
 ## Logging config

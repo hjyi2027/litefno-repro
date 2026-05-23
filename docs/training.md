@@ -12,6 +12,12 @@ You can override config values on the CLI:
 litefno train --config configs/experiments/litefno_gray_scott_reaction_diffusion.yaml --set training.epochs=10 --set training.device=cuda
 ```
 
+Resume from a checkpoint:
+
+```bash
+litefno train --config configs/experiments/litefno_gray_scott_reaction_diffusion.yaml --set training.resume_from=/path/to/epoch_0100.pt
+```
+
 ## What training does
 
 - Loads processed splits from the dataset config (`train`, `valid`, `test` if present).
@@ -42,6 +48,11 @@ Set:
 
 - `training.checkpoint_dir`
 - `training.checkpoint_every`
+
+## Reproducibility
+
+- `training.seed`: sets Python/NumPy/PyTorch random seeds.
+- `training.deterministic`: makes cuDNN deterministic (may reduce performance).
 
 ## Helpful config fields
 

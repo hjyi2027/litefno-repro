@@ -8,6 +8,8 @@ Reproduction and extensions for the Lightweight Fourier Neural Operator (LITEFNO
 - [Setup](docs/setup.md)
 - [Data & preprocessing](docs/data.md)
 - [Training & evaluation](docs/training.md)
+- [Reproduction guide](docs/reproduction.md)
+- [Experiments](docs/experiments.md)
 - [Configuration reference](docs/configs.md)
 - [Metrics](docs/metrics.md)
 - [Extensions roadmap](docs/extensions.md)

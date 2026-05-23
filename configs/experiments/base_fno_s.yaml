@@ -10,11 +10,14 @@ training:
   lr_step: 100
   lr_gamma: 0.5
   device: cuda
+  seed: 1337
+  deterministic: false
   eval_every: 1
   eval_splits: [train, valid]
   eval_windows: [[6, 12], [13, 30]]
   test_at_end: true
   checkpoint_dir: null
   checkpoint_every: 0
+  resume_from: null
   num_workers: 0
   pin_memory: false

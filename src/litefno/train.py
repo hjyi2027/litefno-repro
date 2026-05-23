@@ -3,6 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Sequence
+import random
+
+import numpy as np
 
 import torch
 from torch import nn
@@ -24,12 +27,15 @@ class TrainingConfig:
     lr_step: int = 100
     lr_gamma: float = 0.5
     device: str = "cpu"
+    seed: int | None = 1337
+    deterministic: bool = False
     eval_every: int = 1
     eval_splits: Sequence[str] = ("train", "valid")
     eval_windows: Sequence[Sequence[int]] = ((6, 12), (13, 30))
     test_at_end: bool = True
     checkpoint_dir: str | None = None
     checkpoint_every: int = 0
+    resume_from: str | None = None
     num_workers: int = 0
     pin_memory: bool = False
 
@@ -69,6 +75,17 @@ def build_model(model_cfg: dict, in_channels: int, out_channels: int) -> nn.Modu
 
 def count_parameters(model: nn.Module) -> int:
     return sum(param.numel() for param in model.parameters())
+
+
+def set_seed(seed: int, deterministic: bool = False) -> None:
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+    if deterministic:
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
 
 
 def normalize_windows(windows: Sequence[Sequence[int]], output_steps: int) -> list[tuple[int, int]]:
@@ -129,16 +146,33 @@ def save_checkpoint(
     optimizer: torch.optim.Optimizer,
     epoch: int,
     path: Path,
+    scheduler: torch.optim.lr_scheduler._LRScheduler | None = None,
 ) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    torch.save(
-        {
-            "epoch": epoch,
-            "model_state": model.state_dict(),
-            "optimizer_state": optimizer.state_dict(),
-        },
-        path,
-    )
+    payload = {
+        "epoch": epoch,
+        "model_state": model.state_dict(),
+        "optimizer_state": optimizer.state_dict(),
+    }
+    if scheduler is not None:
+        payload["scheduler_state"] = scheduler.state_dict()
+    torch.save(payload, path)
+
+
+def load_checkpoint(
+    path: Path,
+    model: nn.Module,
+    optimizer: torch.optim.Optimizer | None = None,
+    scheduler: torch.optim.lr_scheduler._LRScheduler | None = None,
+    device: torch.device | None = None,
+) -> int:
+    state = torch.load(path, map_location=device or "cpu")
+    model.load_state_dict(state["model_state"])
+    if optimizer is not None and "optimizer_state" in state:
+        optimizer.load_state_dict(state["optimizer_state"])
+    if scheduler is not None and "scheduler_state" in state:
+        scheduler.load_state_dict(state["scheduler_state"])
+    return int(state.get("epoch", 0))
 
 
 def train_epoch(model: nn.Module, loader, optimizer, device: torch.device, output_steps: int, fields: int):
@@ -211,6 +245,8 @@ def run_training(config_path: Path, overrides=None) -> None:
         eval_splits = [train_cfg.eval_splits]
     else:
         eval_splits = list(train_cfg.eval_splits)
+    if train_cfg.seed is not None:
+        set_seed(train_cfg.seed, train_cfg.deterministic)
 
     loaders = build_dataloaders(
         dataset_cfg=dataset_cfg,
@@ -231,10 +267,16 @@ def run_training(config_path: Path, overrides=None) -> None:
     param_count = count_parameters(model)
     optimizer = AdamW(model.parameters(), lr=train_cfg.lr)
     scheduler = StepLR(optimizer, step_size=train_cfg.lr_step, gamma=train_cfg.lr_gamma)
+    start_epoch = 0
+    if train_cfg.resume_from:
+        resume_path = Path(train_cfg.resume_from)
+        start_epoch = load_checkpoint(resume_path, model, optimizer, scheduler, device)
+        if start_epoch < 0:
+            start_epoch = 0
 
     logger = MetricsLogger(Path(config.get("logging", {}).get("metrics_path", "outputs/logs/metrics.jsonl")))
 
-    for epoch in range(train_cfg.epochs):
+    for epoch in range(start_epoch, train_cfg.epochs):
         loss = train_epoch(model, train_loader, optimizer, device, output_steps, fields)
         log_payload = {"loss": loss, "params": param_count}
         if train_cfg.eval_every > 0 and (epoch + 1) % train_cfg.eval_every == 0:
@@ -249,7 +291,7 @@ def run_training(config_path: Path, overrides=None) -> None:
         if train_cfg.checkpoint_dir and train_cfg.checkpoint_every > 0:
             if (epoch + 1) % train_cfg.checkpoint_every == 0:
                 ckpt_path = Path(train_cfg.checkpoint_dir) / f"epoch_{epoch + 1:04d}.pt"
-                save_checkpoint(model, optimizer, epoch + 1, ckpt_path)
+                save_checkpoint(model, optimizer, epoch + 1, ckpt_path, scheduler=scheduler)
         scheduler.step()
     if train_cfg.test_at_end and "test" in loaders:
         test_metrics = evaluate(model, loaders["test"], device, output_steps, fields, windows=eval_windows)

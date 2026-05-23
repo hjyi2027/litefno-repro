@@ -4,6 +4,17 @@
 
 All datasets are from The Well benchmark (Polymathic AI). Do **not** download the full collection (≈15TB). Start with the smallest dataset and only pull the splits you need.
 
+Recommended order (smallest to largest):
+
+1. `gray_scott_reaction_diffusion`
+2. `euler_multi_quadrants_openBC`
+3. `euler_multi_quadrants_periodicBC`
+4. `acoustic_scattering_discontinuous`
+5. `active_matter`
+6. `rayleigh_benard`
+7. `turbulent_radiative_layer_2D`
+8. `viscoelastic_instability`
+
 ## Expected format
 
 The raw data are HDF5 arrays with shape:
@@ -35,6 +46,17 @@ Preprocessing applies:
 - `downsample_factor`: spatial stride (e.g., 4×).
 - `max_trajectories`: cap on the number of trajectories (paper: ≤1000).
 - `max_steps`: cap on time steps (paper: 30–60, dataset-dependent).
+
+## Common download pattern
+
+For each dataset, download and preprocess train/valid/test splits:
+
+```bash
+litefno download --config configs/datasets/gray_scott_reaction_diffusion.yaml
+litefno preprocess --config configs/datasets/gray_scott_reaction_diffusion.yaml
+```
+
+Repeat with the dataset-specific YAML files in `configs/datasets/`.
 
 ## Dataset config fields
 
