@@ -17,7 +17,7 @@ def build_parser() -> argparse.ArgumentParser:
     preprocess_parser = subparsers.add_parser("preprocess", help="Preprocess dataset splits")
     preprocess_parser.add_argument("--config", required=True, type=Path)
 
-    train_parser = subparsers.add_parser("train", help="Run a training stub")
+    train_parser = subparsers.add_parser("train", help="Run training and evaluation")
     train_parser.add_argument("--config", required=True, type=Path)
     train_parser.add_argument("--set", action="append", default=[], help="Override config key=value")
 
