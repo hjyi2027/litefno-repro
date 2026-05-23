@@ -1,0 +1,12 @@
+model:
+  name: fno_s
+  layers: 8
+  width: 64
+  modes: 12
+training:
+  epochs: 500
+  batch_size: 4
+  lr: 0.001
+  lr_step: 100
+  lr_gamma: 0.5
+  device: cuda
