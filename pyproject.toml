@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "litefno-repro"
+version = "0.1.0"
+description = "Reproduction and extensions for Lightweight Fourier Neural Operator"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "torch",
+  "numpy",
+  "scipy",
+  "matplotlib",
+  "tqdm",
+  "h5py",
+  "pyyaml",
+  "neuraloperator",
+]
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[project.scripts]
+litefno = "litefno.cli:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

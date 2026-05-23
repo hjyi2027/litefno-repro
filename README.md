@@ -1,1 +1,46 @@
 # litefno-repro
+
+Reproduction and extensions for the Lightweight Fourier Neural Operator (LITEFNO) paper, with an emphasis on low-resource deployment.
+
+## Setup
+
+```bash
+conda create -n fno python=3.10
+conda activate fno
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+pip install -e .
+```
+
+For development tools (tests):
+
+```bash
+pip install -e .[dev]
+```
+
+## Data
+
+The project expects The Well datasets as HDF5 with shape `(n_traj, n_steps, H, W, fields)`.
+
+Download (requires `the-well-download` to be installed and on PATH):
+
+```bash
+litefno download --config configs/datasets/gray_scott_reaction_diffusion.yaml
+```
+
+Preprocess (downsampling, trajectory/time caps):
+
+```bash
+litefno preprocess --config configs/datasets/gray_scott_reaction_diffusion.yaml
+```
+
+## Training (stub)
+
+```bash
+litefno train --config configs/experiments/litefno_gray_scott_reaction_diffusion.yaml
+```
+
+## Tests
+
+```bash
+python -m pytest
+```
