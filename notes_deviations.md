@@ -16,6 +16,8 @@ discrete fields before spectral methods.
 
 **Impact:** Likely worse VRMSE than paper. Magnitude unknown until measured.
 
+**Fix applied:** Replace striding with block-mean downsampling to avoid aliasing.
+
 ### Bug 2: Non-random trajectory selection
 **Location:** `cap_trajectories()`, line uses `array[:max_trajectories]`
 
@@ -33,8 +35,10 @@ space the paper trained on.
 **Impact (other datasets):** TBD per dataset — depends on whether trajectories
 in the source HDF5s are ordered by any meaningful property.
 
+**Fix applied:** Randomly sample trajectories (optionally seeded for reproducibility).
+
 ## Status
 - [x] Reported to team
-- [ ] Decision made on whether to fix before or after first reproduction run
-- [ ] Fixed
+- [x] Decision made on whether to fix before or after first reproduction run
+- [x] Fixed
 - [ ] Re-run with fix and compared to buggy baseline

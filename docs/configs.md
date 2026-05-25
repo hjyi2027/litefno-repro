@@ -34,6 +34,7 @@ Used by `litefno download` and `litefno preprocess`:
 - `output_dir`: processed dataset folder.
 - `downsample_factor`: spatial downsampling factor.
 - `max_trajectories`: cap on number of trajectories.
+- `random_seed`: optional seed for trajectory sampling.
 - `max_steps`: cap on time steps.
 - `splits`: which splits to operate on.
 
