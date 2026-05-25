@@ -16,6 +16,8 @@ discrete fields before spectral methods.
 
 **Impact:** Likely worse VRMSE than paper. Magnitude unknown until measured.
 
+**Fix applied:** Replace striding with block-mean downsampling to avoid aliasing.
+
 ### Bug 2: Non-random trajectory selection
 **Location:** `cap_trajectories()`, line uses `array[:max_trajectories]`
 
@@ -33,8 +35,18 @@ space the paper trained on.
 **Impact (other datasets):** TBD per dataset — depends on whether trajectories
 in the source HDF5s are ordered by any meaningful property.
 
+**Fix applied:** Randomly sample trajectories (optionally seeded for reproducibility).
+
 ## Status
 - [x] Reported to team
-- [ ] Decision made on whether to fix before or after first reproduction run
-- [ ] Fixed
+- [x] Decision made on whether to fix before or after first reproduction run
+- [x] Fixed
 - [ ] Re-run with fix and compared to buggy baseline
+
+## Similarities with paper (confirmed in configs)
+- Base model settings match the paper defaults: `layers=8`, `width=64`, and
+  `rank=32` for LiteFNO or `modes=12` for FNO-S (`configs/experiments/base_*.yaml`).
+- Optimizer settings match the paper: AdamW with `lr=1e-3` and a step LR schedule
+  every 100 epochs (`gamma=0.5`).
+- Training length matches the paper default: `epochs=500`.
+- Evaluation windows align with reported VRMSE windows: `6–12` and `13–30`.

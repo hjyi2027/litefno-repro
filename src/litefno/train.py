@@ -53,13 +53,15 @@ def flatten_time(x: torch.Tensor) -> torch.Tensor:
     if x.ndim != 5:
         raise ValueError("Expected 5D tensor (B, T, H, W, C).")
     b, t, h, w, c = x.shape
+    x = x.permute(0, 1, 4, 2, 3)
     return x.reshape(b, t * c, h, w)
 
 
 def unflatten_time(x: torch.Tensor, time_steps: int, channels: int) -> torch.Tensor:
     # (B, T*C, H, W) -> (B, T, H, W, C)
     b, _, h, w = x.shape
-    return x.reshape(b, time_steps, channels, h, w).permute(0, 1, 3, 4, 2)
+    x = x.reshape(b, time_steps, channels, h, w)
+    return x.permute(0, 1, 3, 4, 2)
 
 
 def build_model(model_cfg: dict, in_channels: int, out_channels: int) -> nn.Module:

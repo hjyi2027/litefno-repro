@@ -64,3 +64,6 @@ Metrics are logged to the JSONL path in the config under `logging.metrics_path`.
 ```bash
 python -m pytest
 ```
+
+GitHub Actions runs the same test command on pushes and pull requests via
+`.github/workflows/tests.yml`.
