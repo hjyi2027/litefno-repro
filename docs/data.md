@@ -43,8 +43,12 @@ litefno preprocess --config configs/datasets/gray_scott_reaction_diffusion.yaml
 
 Preprocessing applies:
 
-- `downsample_factor`: spatial stride (e.g., 4×).
-- `max_trajectories`: cap on the number of trajectories (paper: ≤1000).
+- `downsample_factor`: spatial block-mean downsampling (e.g., 4×). If the spatial
+  dimensions are not divisible by the factor, the excess rows/columns are
+  dropped before averaging.
+- `max_trajectories`: random sample cap on the number of trajectories (paper:
+  ≤1000).
+- `random_seed`: optional seed to make the trajectory sampling reproducible.
 - `max_steps`: cap on time steps (paper: 30–60, dataset-dependent).
 
 ## Common download pattern
@@ -69,6 +73,7 @@ Each dataset config lives under `configs/datasets/` and uses:
 - `dataset_key`: HDF5 dataset key (default `data`).
 - `downsample_factor`: spatial stride factor.
 - `max_trajectories`: maximum trajectories to keep.
+- `random_seed`: seed for trajectory sampling (optional).
 - `max_steps`: maximum time steps to keep.
 - `input_steps`: number of input frames.
 - `output_steps`: number of target frames.

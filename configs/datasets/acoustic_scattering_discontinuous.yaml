@@ -6,6 +6,7 @@ dataset:
   dataset_key: data
   downsample_factor: 4
   max_trajectories: 1000
+  random_seed: 0
   max_steps: 60
   input_steps: 1
   output_steps: 1
