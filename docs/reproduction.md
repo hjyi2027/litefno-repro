@@ -56,3 +56,9 @@ The logger writes JSONL records that include:
 - parameter count (`params`)
 
 Report one-step and multi-step VRMSE for the time windows used in the paper.
+
+## 5. Issues, discrepancies, and similarities
+
+Keep a running log of reproduction issues and confirmed matches in
+[`notes_deviations.md`](../notes_deviations.md). Update it whenever you discover
+new discrepancies, fixes, or configuration matches with the paper.
