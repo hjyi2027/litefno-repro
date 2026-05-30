@@ -29,11 +29,30 @@ For development tools (tests):
 pip install -e .[dev]
 ```
 
+### Install `the-well-download`
+
+Dataset downloads use the official Polymathic `the_well` package, which provides
+the `the-well-download` CLI:
+
+```bash
+pip install the_well
+```
+
+This installs `the-well-download` on your `PATH`. Verify with:
+
+```bash
+which the-well-download
+the-well-download --help
+```
+
+The downloader pulls files from HuggingFace; if a dataset is gated, log in once
+with `huggingface-cli login` before running `litefno download`.
+
 ## Data (quickstart)
 
 The project expects The Well datasets as HDF5 with shape `(n_traj, n_steps, H, W, fields)`.
 
-Download (requires `the-well-download` to be installed and on PATH):
+Download (uses `the-well-download` under the hood):
 
 ```bash
 litefno download --config configs/datasets/gray_scott_reaction_diffusion.yaml
@@ -58,6 +77,41 @@ litefno train --config configs/experiments/litefno_gray_scott_reaction_diffusion
 ```
 
 Metrics are logged to the JSONL path in the config under `logging.metrics_path`.
+
+### Checkpoints
+
+When `training.checkpoint_every > 0` or `training.checkpoint_best_metric` is
+set, checkpoints are written to `training.checkpoint_dir` (defaults to
+`outputs/checkpoints/<dataset>/<model>/`):
+
+- `last.pt` — overwritten every `checkpoint_every` epochs
+- `best.pt` — overwritten whenever `checkpoint_best_metric` (e.g. `valid_vrmse`)
+  improves
+
+Resume training from a checkpoint by setting `training.resume_from` in the
+config, or via `--set`:
+
+```bash
+litefno train \
+  --config configs/experiments/litefno_gray_scott_reaction_diffusion.yaml \
+  --set training.resume_from=outputs/checkpoints/gray_scott_reaction_diffusion/litefno/last.pt
+```
+
+### Evaluate a checkpoint on the test split
+
+`litefno test` loads a checkpoint and evaluates it on the requested split,
+printing the metrics and appending them to the experiment's metrics JSONL with
+`step: -1`:
+
+```bash
+litefno test \
+  --config configs/experiments/litefno_gray_scott_reaction_diffusion.yaml \
+  --checkpoint outputs/checkpoints/gray_scott_reaction_diffusion/litefno/best.pt
+```
+
+`--split` accepts `train`, `valid`, or `test` (default `test`). Config values
+can be overridden with `--set` just like during training, e.g.
+`--set training.batch_size=128`.
 
 ## Tests
 
