@@ -1,0 +1,11 @@
+torch
+numpy
+scipy
+matplotlib
+tqdm
+h5py
+pyyaml
+neuraloperator
+
+[dev]
+pytest
