@@ -17,26 +17,29 @@ class SpectralConv2d(nn.Module):
         self.modes2 = modes2
         scale = 1 / (in_channels * out_channels)
         self.weights = nn.Parameter(
-            scale * torch.randn(in_channels, out_channels, modes1, modes2, dtype=torch.cfloat)
+            scale * torch.randn(in_channels, out_channels, modes1, modes2, 2)
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         batchsize, _, height, width = x.shape
-        x_ft = torch.fft.rfft2(x, norm="ortho")
-        out_ft = torch.zeros(
-            batchsize,
-            self.out_channels,
-            height,
-            width // 2 + 1,
-            dtype=torch.cfloat,
-            device=x.device,
-        )
-        out_ft[:, :, : self.modes1, : self.modes2] = compl_mul2d(
-            x_ft[:, :, : self.modes1, : self.modes2],
-            self.weights,
-        )
-        x = torch.fft.irfft2(out_ft, s=(height, width), norm="ortho")
-        return x
+        orig_dtype = x.dtype
+        with torch.amp.autocast(x.device.type, enabled=False):
+            x = x.float()
+            x_ft = torch.fft.rfft2(x, norm="ortho")
+            out_ft = torch.zeros(
+                batchsize,
+                self.out_channels,
+                height,
+                width // 2 + 1,
+                dtype=torch.cfloat,
+                device=x.device,
+            )
+            out_ft[:, :, : self.modes1, : self.modes2] = compl_mul2d(
+                x_ft[:, :, : self.modes1, : self.modes2],
+                torch.view_as_complex(self.weights),
+            )
+            x = torch.fft.irfft2(out_ft, s=(height, width), norm="ortho")
+        return x.to(orig_dtype)
 
 
 class FNOS(nn.Module):

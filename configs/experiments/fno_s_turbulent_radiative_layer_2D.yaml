@@ -5,7 +5,7 @@ dataset:
   dataset_key: data
   input_steps: 1
   output_steps: 1
-  fields: 2
+  fields: 4
   stride: 1
 logging:
   metrics_path: outputs/logs/turbulent_radiative_layer_2D_fno_s.jsonl
