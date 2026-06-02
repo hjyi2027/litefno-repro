@@ -1,0 +1,223 @@
+\documentclass[11pt]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath}
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage{hyperref}
+\usepackage{siunitx}
+\usepackage{pgfplots}
+\usepackage{tikz}
+\usepgfplotslibrary{groupplots}
+\pgfplotsset{compat=1.18}
+
+\title{Reproducing LiteFNO on Gray-Scott Reaction--Diffusion}
+\author{LiteFNO Reproduction Team}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+We report a focused reproduction of the Lightweight Fourier Neural Operator
+(LiteFNO) on the Gray-Scott reaction--diffusion dataset from The Well benchmark.
+Using the repository's default configuration for this task, the model reaches a
+best validation RMSE of \num{0.013112} and validation VRMSE of \num{0.034148} at
+epoch 29, with a test RMSE of \num{0.013201} and test VRMSE of \num{0.035189}.
+The logged run contains 33 epochs (0--32) and a model size of 107,842 parameters.
+We document the exact preprocessing, model, and training settings, provide
+learning curves, and discuss limitations of the current run.
+\end{abstract}
+
+\section{Introduction and Motivation}
+Neural operators provide a data-driven approach to learning solution operators
+for time-dependent partial differential equations (PDEs). LiteFNO is a
+lightweight variant designed to retain the modeling benefits of Fourier Neural
+Operators while reducing parameter count and memory footprint. This paper
+documents a targeted reproduction on the Gray-Scott reaction--diffusion system,
+with emphasis on reproducibility and transparent reporting of configuration and
+metrics.
+
+Beyond benchmarking, efficient surrogate models matter for climate adaptation
+workflows that must run under tight resource constraints. In sub-Saharan Africa,
+smallholder farmers face climate variability that affects planting decisions,
+water management, and crop resilience. Fast, low-footprint surrogate models can
+help enable localized scenario analysis and rapid experimentation in applied
+settings, where compute and connectivity are limited. This reproduction study
+is a step toward validating lightweight operator learning as a building block
+for such downstream decision-support systems.
+
+\section{Dataset and preprocessing}
+All datasets in this repository are drawn from The Well benchmark. The Gray-Scott
+dataset is preprocessed to match the paper's downsampling and trajectory limits.
+Table~\ref{tab:dataset} summarizes the exact preprocessing settings.
+
+\begin{table}[t]
+  \centering
+  \caption{Gray-Scott preprocessing configuration.}
+  \label{tab:dataset}
+  \begin{tabular}{ll}
+    \toprule
+    Setting & Value \\
+    \midrule
+    Dataset name & \texttt{gray\_scott\_reaction\_diffusion} \\
+    Downsample factor & 4 \\
+    Max trajectories & 1000 \\
+    Max steps & 60 \\
+    Input steps & 1 \\
+    Output steps & 1 \\
+    Fields & 2 \\
+    Stride & 1 \\
+    Cache & \texttt{memory} \\
+    Random seed & 0 \\
+    Dataset key & \texttt{data} \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\section{Model and training setup}
+LiteFNO uses a compact spectral architecture configured via YAML. The
+Gray-Scott experiment inherits the base LiteFNO configuration and applies a
+dataset-specific override for data paths and logging. Core settings are listed
+in Table~\ref{tab:training}.
+
+\begin{table}[t]
+  \centering
+  \caption{Model and training configuration for the Gray-Scott LiteFNO run.}
+  \label{tab:training}
+  \begin{tabular}{ll}
+    \toprule
+    Setting & Value \\
+    \midrule
+    Layers & 8 \\
+    Width & 64 \\
+    Rank & 32 \\
+    Epochs (configured) & 200 \\
+    Batch size & 512 \\
+    Learning rate & 1e{-}3 \\
+    LR step & 100 \\
+    LR gamma & 0.5 \\
+    Eval every & 1 \\
+    Eval splits & train, valid \\
+    Eval windows & [6, 12], [13, 30] \\
+    Test at end & true \\
+    Device & \texttt{cuda} \\
+    Seed & 1337 \\
+    AMP & true \\
+    Checkpoint best metric & \texttt{valid\_vrmse} \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\section{Metrics}
+We report root mean squared error (RMSE) and variance-normalized RMSE (VRMSE).
+For prediction \(\hat{y}\) and target \(y\), the metrics are:
+\begin{align}
+\mathrm{RMSE} &= \sqrt{\mathbb{E}\left[(\hat{y} - y)^2\right]}, \\
+\mathrm{VRMSE} &= \sqrt{\frac{\mathbb{E}\left[(\hat{y} - y)^2\right]}{\mathrm{Var}(y) + \epsilon}},
+\end{align}
+where \(\epsilon\) is a small stabilizer.
+
+\section{Reproduction details}
+The reproduction run uses the config
+\texttt{configs/experiments/litefno\_gray\_scott\_reaction\_diffusion.yaml},
+which inherits from \texttt{configs/experiments/base\_litefno.yaml}. Dataset
+preprocessing settings are defined in
+\texttt{configs/datasets/gray\_scott\_reaction\_diffusion.yaml}. The core
+workflow is:
+\begin{verbatim}
+litefno download --config configs/datasets/gray_scott_reaction_diffusion.yaml
+litefno preprocess --config configs/datasets/gray_scott_reaction_diffusion.yaml
+litefno train --config configs/experiments/litefno_gray_scott_reaction_diffusion.yaml
+litefno test --config configs/experiments/litefno_gray_scott_reaction_diffusion.yaml \
+  --checkpoint outputs/checkpoints/gray_scott_reaction_diffusion/litefno/best.pt
+\end{verbatim}
+Metrics are logged as JSONL records to
+\texttt{outputs/logs/gray\_scott\_reaction\_diffusion\_litefno.jsonl}. The
+learning curves in Figure~\ref{fig:learning-curves} are generated from the
+recorded log in this repository at
+\texttt{logs/gray\_scott\_reaction\_diffusion\_litefno.jsonl}.
+
+\section{Extensions \& Results}
+This section reports the baseline reproduction results from the existing log
+and outlines planned extensions for low-resource deployment.
+
+The training log (\texttt{logs/gray\_scott\_reaction\_diffusion\_litefno.jsonl})
+contains 33 epochs (0--32) plus a test evaluation recorded with step \(-1\).
+Validation metrics improve rapidly early in training and plateau by the late
+epochs. Table~\ref{tab:results} lists the best validation and test performance
+and the logged parameter count.
+
+\begin{table}[t]
+  \centering
+  \caption{Summary of Gray-Scott LiteFNO results.}
+  \label{tab:results}
+  \begin{tabular}{ll}
+    \toprule
+    Metric & Value \\
+    \midrule
+    Best validation epoch & 29 \\
+    Best validation RMSE & \num{0.013112} \\
+    Best validation VRMSE & \num{0.034148} \\
+    Final logged epoch & 32 \\
+    Final validation RMSE & \num{0.013310} \\
+    Final validation VRMSE & \num{0.034442} \\
+    Test RMSE & \num{0.013201} \\
+    Test VRMSE & \num{0.035189} \\
+    Parameters & 107,842 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\begin{figure}[t]
+  \centering
+  \begin{tikzpicture}
+    \begin{groupplot}[
+      group style={group size=2 by 1, horizontal sep=1.2cm},
+      width=0.48\textwidth,
+      height=0.35\textwidth,
+      xlabel={Epoch},
+      grid=both,
+      grid style={line width=.1pt, draw=gray!30}
+    ]
+      \nextgroupplot[ylabel={RMSE}]
+      \addplot[blue] table [x=step, y=train_rmse, col sep=comma] {data/gray_scott_litefno_metrics.csv};
+      \addplot[orange] table [x=step, y=valid_rmse, col sep=comma] {data/gray_scott_litefno_metrics.csv};
+      \legend{Train,Valid}
+      \nextgroupplot[ylabel={VRMSE}]
+      \addplot[blue] table [x=step, y=train_vrmse, col sep=comma] {data/gray_scott_litefno_metrics.csv};
+      \addplot[orange] table [x=step, y=valid_vrmse, col sep=comma] {data/gray_scott_litefno_metrics.csv};
+      \legend{Train,Valid}
+    \end{groupplot}
+  \end{tikzpicture}
+  \caption{Training and validation metrics for LiteFNO on Gray-Scott.}
+  \label{fig:learning-curves}
+\end{figure}
+
+The gap between validation and test performance is small, suggesting good
+generalization for this dataset under the configured preprocessing. The best
+validation epoch (29) slightly outperforms the final epoch (32), indicating
+modest metric oscillations late in training. Despite a compact parameter count,
+LiteFNO achieves low VRMSE relative to the initial epoch, with validation RMSE
+improving by roughly 70\% from epoch 0 to the best epoch.
+
+Planned extensions in this repository include low-rank and width sweeps,
+quantization, robustness checks, and explainability analyses. These extensions
+are documented in the project roadmap but are not yet executed in the present
+log, so no extension-specific results are reported here.
+
+\section{Limitations}
+This report is limited to a single LiteFNO run on one dataset and does not yet
+include a baseline comparison (e.g., FNO-S) or multiple random seeds. The log
+contains only 33 epochs, which is shorter than the 200 epochs configured in the
+experiment, so the results should be interpreted as an early or partial run.
+Windowed VRMSE metrics are not available in the current log, and the planned
+extensions have not yet produced results.
+
+\section{Conclusion}
+We documented a LiteFNO reproduction on the Gray-Scott reaction--diffusion
+dataset with full configuration transparency and quantitative results. The
+current run delivers strong validation and test metrics with a compact model,
+and provides a foundation for expanded sweeps and baseline comparisons.
+
+\end{document}
