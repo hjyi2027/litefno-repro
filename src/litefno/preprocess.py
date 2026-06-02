@@ -136,12 +136,43 @@ def _load_well_file_as_5d(path: Path, max_steps: Optional[int] = None) -> np.nda
       * vector (5D ``(n_traj, n_steps, H, W, d)``) -> kept as-is
       * tensor (6D ``(n_traj, n_steps, H, W, d, d)``) -> last two dims flattened
 
+    Time-invariant fields (e.g. material parameters such as ``density`` in the
+    acoustic-scattering regimes) drop The Well's time axis: a scalar arrives
+    as 3D ``(n_traj, H, W)``, a vector as 4D, a tensor as 5D. These are
+    broadcast along a synthetic time axis so they line up with the
+    time-varying fields before channel concatenation.
+
     If ``max_steps`` is provided, the time axis is truncated *at read time*
     via h5py slicing, which avoids loading the full ~21 GB-per-regime file
     into memory for large Well datasets.
     """
     field_arrays: list[np.ndarray] = []
+    expected_ndim = {"t0_fields": 4, "t1_fields": 5, "t2_fields": 6}
     with h5py.File(path, "r") as f:
+        # Time axis size for this regime, used to broadcast time-invariant
+        # fields. Prefer the explicit ``dimensions/time`` axis; otherwise peek
+        # at the first time-varying field we find.
+        if "dimensions/time" in f:
+            full_time = int(f["dimensions/time"].shape[0])
+        else:
+            full_time = None
+            for g in ("t0_fields", "t1_fields", "t2_fields"):
+                if g not in f:
+                    continue
+                for name in f[g].keys():
+                    obj = f[g][name]
+                    if isinstance(obj, h5py.Dataset) and obj.ndim == expected_ndim[g]:
+                        full_time = int(obj.shape[1])
+                        break
+                if full_time is not None:
+                    break
+        if max_steps is None:
+            n_steps = full_time
+        elif full_time is None:
+            n_steps = max_steps
+        else:
+            n_steps = min(max_steps, full_time)
+
         for group_name in ("t0_fields", "t1_fields", "t2_fields"):
             if group_name not in f:
                 continue
@@ -149,7 +180,19 @@ def _load_well_file_as_5d(path: Path, max_steps: Optional[int] = None) -> np.nda
                 obj = f[group_name][name]
                 if not isinstance(obj, h5py.Dataset):
                     continue
-                arr = obj[:, :max_steps] if max_steps is not None else obj[...]
+                if obj.ndim == expected_ndim[group_name] - 1:
+                    if n_steps is None:
+                        raise ValueError(
+                            f"Cannot determine time-axis length to broadcast "
+                            f"time-invariant field {group_name}/{name} in {path}"
+                        )
+                    raw = obj[...]
+                    # broadcast_to returns a view; concatenate below materializes it.
+                    arr = np.broadcast_to(
+                        raw[:, np.newaxis], (raw.shape[0], n_steps, *raw.shape[1:])
+                    )
+                else:
+                    arr = obj[:, :max_steps] if max_steps is not None else obj[...]
                 if arr.ndim == 4:
                     arr = arr[..., np.newaxis]
                 elif arr.ndim == 5:
@@ -197,6 +240,12 @@ def preprocess_well_split(
         arr = _load_well_file_as_5d(path, max_steps=max_steps)
         arr = downsample_spatial(arr, factor)
         regime_arrays.append(arr)
+
+    # Some Well datasets (e.g. viscoelastic_instability) have regimes with
+    # different time-axis lengths. Truncate every regime to the shortest so
+    # they can stack into one trajectory tensor.
+    min_steps = min(arr.shape[1] for arr in regime_arrays)
+    regime_arrays = [arr[:, :min_steps] for arr in regime_arrays]
 
     combined = np.concatenate(regime_arrays, axis=0)
     rng = np.random.default_rng(random_seed) if random_seed is not None else None
